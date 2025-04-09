@@ -555,27 +555,27 @@ namespace EC_Control
             richTextBox1.AppendText($"📌 {codigoEC}\n\n");
 
             // 📖 Assunto em negrito
-            richTextBox1.SelectionFont = new Font("Arial", 9, FontStyle.Bold);
+            richTextBox1.SelectionFont = new Font("Arial", 10, FontStyle.Bold);
             richTextBox1.AppendText("📖 Assunto:\n\n");
 
             // Texto normal após o título
-            richTextBox1.SelectionFont = new Font("Arial", 9, FontStyle.Regular);
+            richTextBox1.SelectionFont = new Font("Arial", 10, FontStyle.Regular);
             richTextBox1.AppendText($"{assunto}\n\n");
 
             // 💬 Comentário em negrito
-            richTextBox1.SelectionFont = new Font("Arial", 9, FontStyle.Bold);
+            richTextBox1.SelectionFont = new Font("Arial", 10, FontStyle.Bold);
             richTextBox1.AppendText("💬 Comentário:\n\n");
 
             // Texto normal após o título
-            richTextBox1.SelectionFont = new Font("Arial", 9, FontStyle.Regular);
+            richTextBox1.SelectionFont = new Font("Arial", 10, FontStyle.Regular);
             richTextBox1.AppendText($"{comentario}\n\n");
 
             // 📅 Data em negrito
-            richTextBox1.SelectionFont = new Font("Arial", 9, FontStyle.Bold);
+            richTextBox1.SelectionFont = new Font("Arial", 10, FontStyle.Bold);
             richTextBox1.AppendText("📅 Data:\n\n");
 
             // Texto normal após o título
-            richTextBox1.SelectionFont = new Font("Arial", 9, FontStyle.Regular);
+            richTextBox1.SelectionFont = new Font("Arial", 10, FontStyle.Regular);
             richTextBox1.AppendText($"{dataReuniao}\n\n");
 
             // Linha separadora
