@@ -1,19 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Windows.Forms;
-using OfficeOpenXml; // Biblioteca EPPlus
-using System.Diagnostics;
 using System.Reflection.Emit;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.Button;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using ClosedXML.Excel;
+using Newtonsoft.Json;
 using NPOI.HSSF.UserModel;
 using NPOI.SS.UserModel;
-using System.Globalization;
-using ClosedXML.Excel;
-using System.Text.RegularExpressions;
-using Newtonsoft.Json;
+using OfficeOpenXml; // Biblioteca EPPlus
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.Button;
 
 namespace EC_Control
 {
@@ -39,8 +40,11 @@ namespace EC_Control
         string pesquisa_AssuntoEC = "";
         string pesquisa_DataReuniaoInicio = "";
         string pesquisa_DataReuniaoFim = "";
+        bool btNovaAba = false;
 
         List<string> pastasParaVerificar = new List<string>();
+        Dictionary<string, Dictionary<string, string>> dataAtaEC = new Dictionary<string, Dictionary<string, string>>();
+        Dictionary<string, string> AtaEC = new Dictionary<string, string>();
 
         public Form1()
         {
@@ -49,54 +53,76 @@ namespace EC_Control
             ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial; // Define a licença da EPPlus
         }
 
-        private void btnPesquisar_Click_1(object sender, EventArgs e)
+        private async void btnPesquisar_Click_1(object sender, EventArgs e)
         {
             verificaNotificação();
 
-            pesquisa_CodigoEC = txtCodigoEC.Text.Trim();
-            pesquisa_AssuntoEC = txtAssunto.Text.Trim();
+            progressBar1.Visible = true;
+            progressBar1.Value = 0;
+
+            pesquisa_CodigoEC = btNovaAba ? codigoEC : txtCodigoEC.Text.Trim();
+            pesquisa_AssuntoEC = btNovaAba ? "" : txtAssunto.Text.Trim();
             pesquisa_DataReuniaoInicio = dtpDataReuniaoInicio.Value.ToString("dd/MM/yyyy"); // Converte a data para o formato correto
             pesquisa_DataReuniaoFim = dtpDataReuniaoFim.Value.ToString("dd/MM/yyyy"); // Converte a data para o formato correto
             string pastaPlanilhas = pastaAtaEC; // Caminho das planilhas
-            bool exibirWord = checkBox_Word.Checked;
-            bool exibirExcel = checkBox_excel.Checked;
-            bool exibirRelatorio = checkBox_relatorio.Checked;
+            bool exibirWord = btNovaAba ? true : checkBox_Word.Checked;
+            bool exibirExcel = btNovaAba ? true: checkBox_excel.Checked;
+            bool exibirRelatorio = btNovaAba ? true : checkBox_relatorio.Checked;
 
             // Verifica se pelo menos um critério de pesquisa foi informado
             if (string.IsNullOrEmpty(pesquisa_CodigoEC) && string.IsNullOrEmpty(pesquisa_AssuntoEC) && !checkBox1.Checked)
             {
+                btNovaAba = false;
+                progressBar1.Visible = false;
+                dgvResultados.DataSource = null;  // Remove a fonte de dados
+                dgvResultados.Rows.Clear();       // Remove todas as linhas
+                dgvResultados.Columns.Clear();    // Remove todas as colunas (se necessário)
                 MessageBox.Show("Digite um código, um assunto ou selecione uma data para pesquisar.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            List<ECInfo> resultados = PesquisarEC(pastaPlanilhas, exibirWord, exibirExcel, exibirRelatorio);
+            var progress = new Progress<int>(valor => progressBar1.Value = valor);
 
-            if (resultados.Count > 0)
+            List<ECInfo> resultados = await Task.Run(() => PesquisarEC(pastaPlanilhas, exibirWord, exibirExcel, exibirRelatorio, progress));
+
+            progressBar1.Visible = false;
+            progressBar1.Value = 100;
+
+            if (btNovaAba)
             {
-                dgvResultados.DataSource = resultados; // Exibe os resultados no DataGridView
-                dgvResultados.Columns[0].Width = 80;
-                dgvResultados.Columns[1].Width = 80;
-                dgvResultados.Columns[2].Width = 350;
-                dgvResultados.Columns[3].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                dgvResultados.Columns[4].Width = 100;
-
-                dgvResultados.CurrentCell = dgvResultados.Rows[0].Cells[0]; // Define o foco na primeira célula
-                dgvResultados.Focus(); // Garante que o DataGridView receba o foco
-
-                dgvResultados.DataSource = ((List<ECInfo>)dgvResultados.DataSource)
-                    .OrderByDescending(ec => DateTime.TryParse(ec.Data, out DateTime data) ? data : DateTime.MaxValue)
-                    .ToList();
+                btNovaAba = false;
+                NovaAba novaAba = new NovaAba(resultados, codigoEC);
+                novaAba.Show();
             }
             else
             {
-                dgvResultados.DataSource = null;  // Remove a fonte de dados
-                dgvResultados.Rows.Clear();       // Remove todas as linhas
-                dgvResultados.Columns.Clear();    // Remove todas as colunas (se necessário)
-                MessageBox.Show("Nenhuma EC encontrada com os critérios informados.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (resultados.Count > 0)
+                {
+                    dgvResultados.DataSource = resultados; // Exibe os resultados no DataGridView
+                    dgvResultados.Columns[0].Width = 80;
+                    dgvResultados.Columns[1].Width = 80;
+                    dgvResultados.Columns[2].Width = 350;
+                    dgvResultados.Columns[3].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                    dgvResultados.Columns[4].Width = 100;
+
+                    dgvResultados.CurrentCell = dgvResultados.Rows[0].Cells[0]; // Define o foco na primeira célula
+                    dgvResultados.Focus(); // Garante que o DataGridView receba o foco
+
+                    dgvResultados.DataSource = ((List<ECInfo>)dgvResultados.DataSource)
+                        .OrderByDescending(ec => DateTime.TryParse(ec.Data, out DateTime data) ? data : DateTime.MaxValue)
+                        .ToList();
+                }
+                else
+                {
+                    dgvResultados.DataSource = null;  // Remove a fonte de dados
+                    dgvResultados.Rows.Clear();       // Remove todas as linhas
+                    dgvResultados.Columns.Clear();    // Remove todas as colunas (se necessário)
+                    MessageBox.Show("Nenhuma EC encontrada com os critérios informados.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
         }
 
-        private List<ECInfo> PesquisarEC(string pasta, bool exibirWord, bool exibirExcel, bool exibirRelatorio)
+        private List<ECInfo> PesquisarEC(string pasta, bool exibirWord, bool exibirExcel, bool exibirRelatorio, IProgress<int> progress)
         {
             List<ECInfo> resultados = new List<ECInfo>();
             List<string> codigosECPasta = new List<string>();
@@ -115,6 +141,7 @@ namespace EC_Control
                 arquivos = dir.GetFiles("*.xlsx").Where(f => !f.Name.Equals(nomeArqRLDiario, StringComparison.OrdinalIgnoreCase)).ToArray();
             }
 
+            progress?.Report(20);
             // Se checkBox2 estiver marcado, adiciona o "Relatorios.xlsx" na lista
             if (exibirRelatorio)
             {
@@ -126,15 +153,7 @@ namespace EC_Control
                     arquivos = listaArquivos.ToArray();
                 }
             }
-
-            if (arquivos.Length == 0)
-            {
-                //MessageBox.Show("Nenhum arquivo Excel encontrado na pasta configurada.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                dgvResultados.DataSource = null;  // Remove a fonte de dados
-                dgvResultados.Rows.Clear();       // Remove todas as linhas
-                dgvResultados.Columns.Clear();    // Remove todas as colunas (se necessário)
-                //return resultados;
-            }
+            progress?.Report(40);
 
             string caminhoPasta = pastaAllEC; // Defina o caminho da pasta
             List<string> arquivosEncontrados = new List<string>();
@@ -165,7 +184,7 @@ namespace EC_Control
                         }
                     }
                 }
-            
+            progress?.Report(60);
 
             foreach (var arquivo in arquivos)
             {
@@ -295,6 +314,7 @@ namespace EC_Control
                     }
                 }
             }
+            progress?.Report(80);
             if (exibirWord)
             {
                 string caminhoNovaPasta = pastaAllEC;
@@ -496,8 +516,7 @@ namespace EC_Control
 
         private void configurarToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            ConfigForm configForm = new ConfigForm();
-            configForm.ShowDialog(); // Exibe a tela de configuração
+
         }
 
         private void checkBox1_CheckedChanged(object sender, EventArgs e)
@@ -589,6 +608,7 @@ namespace EC_Control
             Config();
             verificaNotificação();
             CarregarPastas();
+            CentralizarProgressBar();
         }
 
         private void CarregarPastas()
@@ -607,18 +627,7 @@ namespace EC_Control
 
         private void button1_Click(object sender, EventArgs e)
         {
-            if (!string.IsNullOrWhiteSpace(codigoEC))
-            {
-                Form2 form2 = new Form2(codigoEC, assunto, comentario); // Passa o dado para o Form2
-                form2.RelatorioSalvo += AtualizarTela;
 
-                form2.Show(); // Abre o segundo formulário
-            }
-            else
-            {
-                MessageBox.Show("Associe o relatório do dia a uma EC", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
-            }
         }
 
         private void AtualizarTela()
@@ -767,41 +776,6 @@ namespace EC_Control
             menuPastas.DropDownItems.Add(novoSubItem);
         }
 
-        private void checkBox_excel_Click(object sender, EventArgs e)
-        {
-            Config();
-            string pastaPlanilhas = pastaAtaEC; // Caminho das planilhas
-            bool exibirWord = checkBox_Word.Checked;
-            bool exibirExcel = checkBox_excel.Checked;
-            bool exibirRelatorio = checkBox_relatorio.Checked;
-
-            List<ECInfo> resultados = PesquisarEC(pastaPlanilhas, exibirWord, exibirExcel, exibirRelatorio);
-
-            if (resultados.Count > 0)
-            {
-                dgvResultados.DataSource = resultados; // Exibe os resultados no DataGridView
-                dgvResultados.Columns[0].Width = 80;
-                dgvResultados.Columns[1].Width = 80;
-                dgvResultados.Columns[2].Width = 230;
-                dgvResultados.Columns[3].Width = 600;
-                dgvResultados.Columns[4].Width = 150;
-
-                dgvResultados.CurrentCell = dgvResultados.Rows[0].Cells[0]; // Define o foco na primeira célula
-                dgvResultados.Focus(); // Garante que o DataGridView receba o foco
-
-                dgvResultados.DataSource = ((List<ECInfo>)dgvResultados.DataSource)
-                    .OrderByDescending(ec => DateTime.TryParse(ec.Data, out DateTime data) ? data : DateTime.MaxValue)
-                    .ToList();
-            }
-            else
-            {
-                dgvResultados.DataSource = null;  // Remove a fonte de dados
-                dgvResultados.Rows.Clear();       // Remove todas as linhas
-                dgvResultados.Columns.Clear();    // Remove todas as colunas (se necessário)
-                MessageBox.Show("Nenhuma EC encontrada com os critérios informados.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-        }
-
         private void btn_notificacao_Click(object sender, EventArgs e)
         {
             string caminhoArquivo = pastaRLDiario + @"\" + nomeArqRLDiario; // Caminho do arquivo
@@ -920,57 +894,7 @@ namespace EC_Control
 
         private void button2_Click(object sender, EventArgs e)
         {
-            using (SaveFileDialog sfd = new SaveFileDialog() {
-                Filter = "Excel Workbook|*.xlsx",
-                Title = "Salvar como",
-                FileName = "Relatório " + codigoEC
-            })
-            {
-                if (sfd.ShowDialog() == DialogResult.OK)
-                {
-                    try
-                    {
-                        using (var workbook = new XLWorkbook())
-                        {
-                            var worksheet = workbook.Worksheets.Add("Resultados");
-                            int colCount = dgvResultados.ColumnCount;
-                            int rowCount = dgvResultados.RowCount;
 
-                            // Adiciona cabeçalhos formatados
-                            for (int i = 0; i < colCount; i++)
-                            {
-                                var cell = worksheet.Cell(1, i + 1);
-                                cell.Value = dgvResultados.Columns[i].HeaderText;
-                                cell.Style.Font.Bold = true;
-                                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                                cell.Style.Fill.BackgroundColor = XLColor.LightGray; // Cor de fundo do cabeçalho
-                            }
-
-                            // Adiciona os dados
-                            for (int i = 0; i < rowCount; i++)
-                            {
-                                for (int j = 0; j < colCount; j++)
-                                {
-                                    var cell = worksheet.Cell(i + 2, j + 1);
-                                    cell.Value = dgvResultados.Rows[i].Cells[j].Value?.ToString();
-                                    cell.Style.Alignment.WrapText = true; // Habilita quebra de linha
-                                }
-                            }
-
-                            // Ajusta o tamanho das colunas para caber o conteúdo
-                            worksheet.Columns().AdjustToContents();
-
-                            // Salva o arquivo
-                            workbook.SaveAs(sfd.FileName);
-                            MessageBox.Show("Dados exportados com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show("Erro ao salvar: " + ex.Message, "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
-            }
         }
 
         private void button3_Click(object sender, EventArgs e)
@@ -1086,7 +1010,173 @@ namespace EC_Control
             }
         }
 
-        private void button4_Click(object sender, EventArgs e)
+        private void checkBox_Andamento_Click(object sender, EventArgs e)
+        {
+            if (checkBox_Andamento.Checked)
+            {
+                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "2_WIP"), StringComparer.OrdinalIgnoreCase))
+                {
+                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "2_WIP"));
+                }  
+            }
+            else
+            {
+                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "2_WIP"));
+                //checkBox_Word.Checked = false;
+            }
+
+            
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void checkBox_NovaEC_Click(object sender, EventArgs e)
+        {
+            if (checkBox_NovaEC.Checked)
+            {
+                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "0_NEW"), StringComparer.OrdinalIgnoreCase))
+                {
+                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "0_NEW"));
+                }
+            }
+            else
+            {
+                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "0_NEW"));
+            }
+
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void checkBox_ComPendencia_Click(object sender, EventArgs e)
+        {
+            if (checkBox_ComPendencia.Checked)
+            {
+                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "3- WIP - FEEDBACK"), StringComparer.OrdinalIgnoreCase))
+                {
+                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "3- WIP - FEEDBACK"));
+                }
+            }
+            else
+            {
+                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "3- WIP - FEEDBACK"));
+            }
+
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void checkBox_Word_CheckedChanged(object sender, EventArgs e)
+        {
+            
+        }
+
+        private void checkBox_Word_Click(object sender, EventArgs e)
+        {
+            if(checkBox_Word.Checked)
+            {
+                checkBox_Andamento.Enabled = true;
+                checkBox_NovaEC.Enabled = true;
+                checkBox_Fila.Enabled = true;
+                checkBox_Finalizado.Enabled = true;
+                checkBox_AguardandoAvaliacao.Enabled = true;
+                checkBox_ComPendencia.Enabled = true;
+
+            }
+            else
+            {
+                checkBox_Andamento.Enabled = false;
+                checkBox_NovaEC.Enabled = false;
+                checkBox_Fila.Enabled = false;
+                checkBox_Finalizado.Enabled = false;
+                checkBox_AguardandoAvaliacao.Enabled = false;
+                checkBox_ComPendencia.Enabled = false;
+            }
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void checkBox_Fila_Click(object sender, EventArgs e)
+        {
+            if (checkBox_Fila.Checked)
+            {
+                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "1_QUEUE"), StringComparer.OrdinalIgnoreCase))
+                {
+                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "1_QUEUE"));
+                }
+            }
+            else
+            {
+                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "1_QUEUE"));
+            }
+
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void checkBox_Finalizado_Click(object sender, EventArgs e)
+        {
+            if (checkBox_Finalizado.Checked)
+            {
+                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "5_CLOSED"), StringComparer.OrdinalIgnoreCase))
+                {
+                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "5_CLOSED"));
+                }
+            }
+            else
+            {
+                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "5_CLOSED"));
+            }
+
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void checkBox_AguardandoAvaliacao_Click(object sender, EventArgs e)
+        {
+            if (checkBox_AguardandoAvaliacao.Checked)
+            {
+                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "4_FEEDBACK"), StringComparer.OrdinalIgnoreCase))
+                {
+                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "4_FEEDBACK"));
+                }
+            }
+            else
+            {
+                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "4_FEEDBACK"));
+            }
+
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void button5_Click(object sender, EventArgs e)
+        {
+
+            
+        }
+        private void CentralizarProgressBar()
+        {
+            // Centraliza o ProgressBar dentro do DataGridView
+            progressBar1.Left = dgvResultados.Left + (dgvResultados.Width - progressBar1.Width) / 2;
+            progressBar1.Top = dgvResultados.Top + (dgvResultados.Height - progressBar1.Height) / 2;
+        }
+
+        private void Form1_Resize(object sender, EventArgs e)
+        {
+            CentralizarProgressBar();
+        }
+
+        private void criarRelatórioDoDiaToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrWhiteSpace(codigoEC))
+            {
+                Form2 form2 = new Form2(codigoEC, assunto, comentario); // Passa o dado para o Form2
+                form2.RelatorioSalvo += AtualizarTela;
+
+                form2.Show(); // Abre o segundo formulário
+            }
+            else
+            {
+                MessageBox.Show("Associe o relatório do dia a uma EC", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+            }
+        }
+
+        private void excluirRelatórioDoDiaToolStripMenuItem_Click(object sender, EventArgs e)
         {
             try
             {
@@ -1146,151 +1236,187 @@ namespace EC_Control
                 MessageBox.Show($"Erro ao excluir a linha, verifique se o documento está aberto: {ex.Message}", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
 
-            checkBox_excel_Click(sender, e); // Atualiza a interface após a exclusão
+            btnPesquisar_Click_1(sender, e); // Atualiza a interface após a exclusão
             verificaNotificação();
         }
 
-        private void label3_Click(object sender, EventArgs e)
+        private void criarAtaDeReuniãoToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            criarAtaDeReuniãoToolStripMenuItem.Checked = !criarAtaDeReuniãoToolStripMenuItem.Checked;
 
-        }
-
-        private void groupBox4_Enter(object sender, EventArgs e)
-        {
-
-        }
-
-        private void checkBox_Andamento_Click(object sender, EventArgs e)
-        {
-            if (checkBox_Andamento.Checked)
+            if (criarAtaDeReuniãoToolStripMenuItem.Checked)
             {
-                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "2_WIP"), StringComparer.OrdinalIgnoreCase))
-                {
-                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "2_WIP"));
-                }  
+                panel11.Visible = true;
+                panel10.Visible = true;
             }
             else
             {
-                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "2_WIP"));
-                //checkBox_Word.Checked = false;
+                panel11.Visible = false;
+                panel10.Visible = false;
+                btnPesquisar_Click_1(sender, e);
             }
-
-            
-            checkBox_excel_Click(sender, e);
         }
 
-        private void checkBox_NovaEC_Click(object sender, EventArgs e)
+        private void salvaEmXMLToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (checkBox_NovaEC.Checked)
+            using (SaveFileDialog sfd = new SaveFileDialog()
             {
-                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "0_NEW"), StringComparer.OrdinalIgnoreCase))
+                Filter = "Excel Workbook|*.xlsx",
+                Title = "Salvar como",
+                FileName = "Relatório " + codigoEC
+            })
+            {
+                if (sfd.ShowDialog() == DialogResult.OK)
                 {
-                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "0_NEW"));
+                    try
+                    {
+                        using (var workbook = new XLWorkbook())
+                        {
+                            var worksheet = workbook.Worksheets.Add("Resultados");
+                            int colCount = dgvResultados.ColumnCount;
+                            int rowCount = dgvResultados.RowCount;
+
+                            // Adiciona cabeçalhos formatados
+                            for (int i = 0; i < colCount; i++)
+                            {
+                                var cell = worksheet.Cell(1, i + 1);
+                                cell.Value = dgvResultados.Columns[i].HeaderText;
+                                cell.Style.Font.Bold = true;
+                                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                                cell.Style.Fill.BackgroundColor = XLColor.LightGray; // Cor de fundo do cabeçalho
+                            }
+
+                            // Adiciona os dados
+                            for (int i = 0; i < rowCount; i++)
+                            {
+                                for (int j = 0; j < colCount; j++)
+                                {
+                                    var cell = worksheet.Cell(i + 2, j + 1);
+                                    cell.Value = dgvResultados.Rows[i].Cells[j].Value?.ToString();
+                                    cell.Style.Alignment.WrapText = true; // Habilita quebra de linha
+                                }
+                            }
+
+                            // Ajusta o tamanho das colunas para caber o conteúdo
+                            worksheet.Columns().AdjustToContents();
+
+                            // Salva o arquivo
+                            workbook.SaveAs(sfd.FileName);
+                            MessageBox.Show("Dados exportados com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Erro ao salvar: " + ex.Message, "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 }
             }
-            else
-            {
-                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "0_NEW"));
-            }
-
-            checkBox_excel_Click(sender, e);
         }
 
-        private void checkBox_ComPendencia_Click(object sender, EventArgs e)
+        private void button1_Click_1(object sender, EventArgs e)
         {
-            if (checkBox_ComPendencia.Checked)
+            btNovaAba = true;
+            btnPesquisar_Click_1(sender, e);
+        }
+
+        private void configuraçõesDePastaToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            ConfigForm configForm = new ConfigForm();
+            configForm.ShowDialog(); // Exibe a tela de configuração
+        }
+
+        private void button2_Click_1(object sender, EventArgs e)
+        {
+            string data = dateTimePicker2.Value.ToShortDateString();
+
+            if (dgvResultados.DataSource != null)
             {
-                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "3- WIP - FEEDBACK"), StringComparer.OrdinalIgnoreCase))
+
+                if (!dataAtaEC.ContainsKey(data))
                 {
-                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "3- WIP - FEEDBACK"));
+                    dataAtaEC[data] = new Dictionary<string, string>();
+                }
+
+                // Recupera o dicionário da data específica
+                AtaEC = dataAtaEC[data];
+
+                // Verifica se a EC (chave) já existe
+                if (!AtaEC.ContainsKey(codigoEC))
+                {
+                    AtaEC.Add(codigoEC, assunto); // Adiciona EC e descrição
+                    btnPesquisar_Click_1(sender, e); // Executa a ação que você quiser após adicionar
+                }
+                else
+                {
+                    MessageBox.Show("Essa EC já existe na Ata desse dia.");
                 }
             }
-            else
-            {
-                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "3- WIP - FEEDBACK"));
-            }
-
-            checkBox_excel_Click(sender, e);
         }
 
-        private void checkBox_Word_CheckedChanged(object sender, EventArgs e)
+        private void abrirEditorToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            
+            string data = dateTimePicker1.Value.ToShortDateString();
+            string nameExcel = DateTime.Parse(data).ToString("yyyy-MM-dd");
+
+            if (!dataAtaEC.ContainsKey(data))
+            {
+                dataAtaEC[data] = new Dictionary<string, string>();
+            }
+
+            AtaEC = dataAtaEC[data];
+
+            Ata Ata = new Ata(AtaEC, data, nameExcel);
+            Ata.Show();
         }
 
-        private void checkBox_Word_Click(object sender, EventArgs e)
+        private void dgvResultados_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
         {
-            if(checkBox_Word.Checked)
+            if (criarAtaDeReuniãoToolStripMenuItem.Checked)
             {
-                checkBox_Andamento.Enabled = true;
-                checkBox_NovaEC.Enabled = true;
-                checkBox_Fila.Enabled = true;
-                checkBox_Finalizado.Enabled = true;
-                checkBox_AguardandoAvaliacao.Enabled = true;
-                checkBox_ComPendencia.Enabled = true;
-
-            }
-            else
-            {
-                checkBox_Andamento.Enabled = false;
-                checkBox_NovaEC.Enabled = false;
-                checkBox_Fila.Enabled = false;
-                checkBox_Finalizado.Enabled = false;
-                checkBox_AguardandoAvaliacao.Enabled = false;
-                checkBox_ComPendencia.Enabled = false;
-            }
-            checkBox_excel_Click(sender, e);
-        }
-
-        private void checkBox_Fila_Click(object sender, EventArgs e)
-        {
-            if (checkBox_Fila.Checked)
-            {
-                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "1_QUEUE"), StringComparer.OrdinalIgnoreCase))
+                foreach (DataGridViewRow row in dgvResultados.Rows)
                 {
-                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "1_QUEUE"));
+                    string chave = row.Cells["CodigoEC"].Value?.ToString();
+                    if (!string.IsNullOrEmpty(chave) && AtaEC.ContainsKey(chave))
+                    {
+                        row.DefaultCellStyle.BackColor = Color.LightGreen;
+                    }
                 }
             }
-            else
-            {
-                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "1_QUEUE"));
-            }
 
-            checkBox_excel_Click(sender, e);
         }
 
-        private void checkBox_Finalizado_Click(object sender, EventArgs e)
+        private void button4_Click(object sender, EventArgs e)
         {
-            if (checkBox_Finalizado.Checked)
+
+            string data = dateTimePicker2.Value.ToShortDateString();
+
+            if (dgvResultados.DataSource != null)
             {
-                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "5_CLOSED"), StringComparer.OrdinalIgnoreCase))
+                if (!dataAtaEC.ContainsKey(data))
                 {
-                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "5_CLOSED"));
+                    dataAtaEC[data] = new Dictionary<string, string>();
+                }
+
+                // Recupera o dicionário da data específica
+                AtaEC = dataAtaEC[data];
+
+                // Verifica se a EC (chave) já existe
+                if (AtaEC.ContainsKey(codigoEC))
+                {
+                    AtaEC.Remove(codigoEC); // Adiciona EC e descrição
+                    btnPesquisar_Click_1(sender, e); // Executa a ação que você quiser após adicionar
+                }
+                else
+                {
+                    MessageBox.Show("Essa EC não existe na Ata desse dia.");
                 }
             }
-            else
-            {
-                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "5_CLOSED"));
-            }
-
-            checkBox_excel_Click(sender, e);
         }
 
-        private void checkBox_AguardandoAvaliacao_Click(object sender, EventArgs e)
+        private void configEmail_Click(object sender, EventArgs e)
         {
-            if (checkBox_AguardandoAvaliacao.Checked)
-            {
-                if (!pastasParaVerificar.Contains(Path.Combine(pastaAllEC, "4_FEEDBACK"), StringComparer.OrdinalIgnoreCase))
-                {
-                    pastasParaVerificar.Add(Path.Combine(pastaAllEC, "4_FEEDBACK"));
-                }
-            }
-            else
-            {
-                pastasParaVerificar.Remove(Path.Combine(pastaAllEC, "4_FEEDBACK"));
-            }
-
-            checkBox_excel_Click(sender, e);
+            ConfigurarEmail cfgEmail = new ConfigurarEmail();
+            cfgEmail.ShowDialog();
         }
     }
 
